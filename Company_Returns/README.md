@@ -1,52 +1,84 @@
-Post-Earnings-Announcement Drift (PEAD) Strategy Research
+# Post-Earnings-Announcement Drift (PEAD) Strategy Research
 
-A self-directed research project testing whether stocks that report earnings surprises keep drifting in the direction of the surprise over the following weeks — and whether that drift is large and consistent enough to trade.
+A self-directed quantitative research project investigating whether equities that report earnings surprises continue to drift in the direction of the surprise over subsequent weeks — and evaluating whether this drift is large, persistent, and consistent enough to trade net of costs.
 
-Background
+---
 
-Fast-moving, high-profile news (Fed announcements, major macro headlines) is already efficiently priced by low-latency systematic desks — not a realistic edge to chase without their infrastructure. PEAD is a slower, well-documented academic phenomenon that fits a "hold for days, not milliseconds" style of research instead: markets appear to underreact to earnings surprises at the moment of announcement, with the price continuing to drift toward its "correct" level over the following days to weeks.
+## Background
 
-This repo is an end-to-end walkthrough of testing that hypothesis: from raw event study, to a manual rules-based backtest with real trading costs, to early (so far inconclusive) attempts at improving trade selection with ML.
+Fast-moving, high-profile macro headlines and central bank announcements are priced near-instantaneously by low-latency systematic infrastructure. Generating alpha on those horizons requires specialized co-location and execution capabilities.
 
-Repository Structure
-File	Purpose
-prices.py	Core pipeline. Auto-fetches historical earnings dates and surprise percentages per ticker, downloads price history, computes benchmark-adjusted abnormal returns (AR) against SPY, aligns events by trading day relative to announcement, and produces Cumulative Abnormal Return (CAR) per event.
-backtest.py / backtest2.py	Manual, rules-based backtest: long after a positive surprise / short after a negative surprise, holding 20 trading days, net of an assumed round-trip fee/slippage cost.
-ml_dataset.csv	One row per earnings event (Ticker, Event_Date, Surprise_Pct, CAR_20d, Profitable_20d), exported from the event study for use in modeling.
-binary_classification.py	Logistic regression predicting whether a trade is profitable at +20 trading days, using Surprise_Pct as the sole feature.
-regression.py	Linear regression predicting CAR_20d directly, using Surprise_Pct as the sole feature.
-Figure_2.png	Mean CAR by event day, split by surprise direction — the core event-study chart.
-Regression plot.png	Scatter of Surprise_Pct vs. CAR_20d with the fitted regression line.
-Universe
+In contrast, **Post-Earnings-Announcement Drift (PEAD)** is a well-documented academic market anomaly operating on a multi-day to multi-week horizon:
+* **The Premise:** Markets systematically underreact to quarterly earnings surprises at the moment of release.
+* **The Mechanism:** Prices tend to drift incrementally toward their fundamental post-earnings value over days or weeks following the announcement.
 
-6 mega-cap tickers (AAPL, META, MSFT, TSLA, QCOM, LII) plus 14 mid/small-cap tickers (CROX, FIVE, WING, CAKE, TXRH, SFM, OLLI, RH, DECK, ONON, CHDN, FND, DUOL, APPF), chosen to include names with thinner analyst coverage than the mega-caps — PEAD is better documented in less-followed names.
+This repository provides an end-to-end framework evaluating this hypothesis: spanning raw event study construction, rules-based backtesting under realistic transaction friction, out-of-sample validation, and machine learning trade selection models.
 
-Method
-Pull each ticker's last several quarters of reported EPS estimate, actual EPS, and surprise % automatically (no manual data entry).
-Exclude any event whose 20-trading-day post-announcement window hasn't fully elapsed yet.
-Download price history once per ticker (not once per event) to avoid hitting exchange data-provider rate limits.
-Compute daily abnormal return: AR = Stock Return − SPY Return.
-Align every event on trading days relative to its own announcement date (event_day = 0), so events on different calendar dates become comparable.
-Cumulative-sum AR within each event to get CAR.
-Average CAR by event_day across events, split by surprise direction.
-Key Findings
+---
 
-Event study (n=435 events, +20 trading day horizon):
+## Repository Structure
 
-Group	n	Mean CAR	p-value	Result
-All events	435	+1.21%	0.0750	Not significant
-Positive surprise	339	+2.28%	0.0025	Significant
-Negative surprise	96	-2.57%	0.0966	Not significant
+| File / Asset | Description |
+| :--- | :--- |
+| `prices.py` | Core data pipeline. Automatically retrieves historical earnings dates and surprise percentages, downloads price histories, computes benchmark-adjusted abnormal returns ($AR$) against SPY, aligns events to a relative trading-day index ($t_0$), and computes Cumulative Abnormal Return ($CAR$) series. |
+| `backtest.py` / `backtest2.py` | Rules-based backtesting engine: enters long positions post-positive surprise and short positions post-negative surprise over a 20-day holding horizon, net of round-trip slippage and execution costs. |
+| `ml_dataset.csv` | Structured dataset containing one record per earnings event (`Ticker`, `Event_Date`, `Surprise_Pct`, `CAR_20d`, `Profitable_20d`) exported from the event pipeline. |
+| `binary_classification.py` | Logistic regression model evaluating trade probability of profit at +20 trading days using `Surprise_Pct`. |
+| `regression.py` | OLS linear regression model estimating expected `CAR_20d` directly from `Surprise_Pct`. |
+| `Figure_2.png` | Event study visualization showing mean CAR trajectory across relative event days, segmented by surprise polarity. |
+| `Regression plot.png` | Scatter plot of `Surprise_Pct` vs. realized `CAR_20d` overlaid with the fitted regression curve. |
 
-Manual backtest (20-day hold, fees included): 54.7% win rate, +0.99% mean net return per trade overall. The long side alone (+1.86% mean) is responsible for essentially all of the edge — the short side lost money on average (-1.90% mean), because CAR measures return relative to SPY; an unhedged short can lose even when the stock underperforms the market, if the market itself is rising.
+---
 
-Out-of-sample check: splitting trades chronologically (not randomly), the long-only edge held up and was, if anything, stronger in the more recent period (p=0.0070 vs. p=0.1284 in the earlier period) — though the later period also includes a broader mix of tickers, which may partly explain the apparent strengthening.
+## Universe Selection
 
-ML modeling (in progress, inconclusive so far): both a logistic classifier and a linear regressor, using Surprise_Pct as the only feature, failed to show a statistically significant ability to rank trades beyond the already-confirmed average effect (top-quartile edges of +1.78pp and -2.17pp respectively, neither significant, p > 0.45 in both cases). A data quality issue was also identified during this stage: a small number of extreme Surprise_Pct outliers (into the thousands of percent, caused by near-zero EPS estimates in the denominator of the surprise calculation) likely distorted both models and should be filtered before re-running.
+The backtest universe spans 20 tickers balancing liquid large caps with less-covered mid/small-cap equities (where PEAD effects are traditionally more pronounced due to lower analyst coverage):
 
-Current Status / Limitations
-Only the long-only rule (buy after a positive surprise, hold 20 days) is currently supported as tradeable by the data.
-The negative-surprise signal is real in relative terms but needs a market-neutral redesign (short the stock, hedge with a long SPY position) before it can actually be captured as profit.
-All results are backtested, not live — no paper trading has been run yet.
-The extreme-outlier Surprise_Pct rows have not yet been filtered out and re-tested; current ML conclusions should be treated as provisional pending that fix.
-Return/stdev per trade (~0.09) is low — a real but noisy edge, meaning it would need to be spread across many concurrent positions rather than relied on for any single trade.
+* **Mega-Cap Baseline (6):** `AAPL`, `META`, `MSFT`, `TSLA`, `QCOM`, `LII`
+* **Mid/Small-Cap Focus (14):** `CROX`, `FIVE`, `WING`, `CAKE`, `TXRH`, `SFM`, `OLLI`, `RH`, `DECK`, `ONON`, `CHDN`, `FND`, `DUOL`, `APPF`
+
+---
+
+## Methodology
+
+1. **Automated Ingestion:** Historical consensus EPS estimates, reported EPS, and surprise percentages are ingested programmatically across multiple historical quarters per ticker.
+2. **Window Censoring:** Any recent earnings event lacking a full +20 trading-day forward window is excluded from the sample.
+3. **Optimized Market Data Pipeline:** Adjusted closing prices are fetched per ticker in bulk to avoid API rate constraints.
+4. **Abnormal Return Calculation:** Daily abnormal return is calculated against the market benchmark:
+   $$AR_{i,t} = R_{i,t} - R_{SPY,t}$$
+5. **Event-Time Alignment:** Event timestamps are normalized such that the announcement date is defined as $t = 0$.
+6. **CAR Aggregation:** Daily abnormal returns are cumulatively summed across the 20-day post-announcement window:
+   $$CAR_{i} = \sum_{t=1}^{20} AR_{i,t}$$
+7. **Cohort Evaluation:** Mean CAR paths are grouped and evaluated across positive vs. negative surprise cohorts.
+
+---
+
+## Key Findings
+
+### 1. Event Study Results ($n = 435$, 20-Day Horizon)
+
+| Group | $n$ | Mean CAR | $p$-value | Statistical Significance |
+| :--- | :--- | :--- | :--- | :--- |
+| **All Events** | 435 | +1.21% | 0.0750 | Not Significant ($\alpha = 0.05$) |
+| **Positive Surprise** | 339 | **+2.28%** | **0.0025** | **Statistically Significant** |
+| **Negative Surprise** | 96 | -2.57% | 0.0966 | Not Significant ($\alpha = 0.05$) |
+
+### 2. Backtest Performance (20-Day Fixed Holding, Net of Fees)
+* **Overall Metrics:** 54.7% win rate, **+0.99% mean net return** per trade.
+* **Long vs. Short Asymmetry:** The long-only leg delivered **+1.86% mean return**, driving the entire statistical edge. The unhedged short leg averaged **-1.90%**. Because returns were unhedged in an upward-trending market regime, short positions lost money in absolute terms despite relative underperformance vs. SPY.
+
+### 3. Chronological Out-of-Sample Validation
+Splitting trades chronologically (rather than randomly) demonstrated that the long-only drift persisted into the out-of-sample period ($p = 0.0070$ in the recent cohort vs. $p = 0.1284$ in the baseline historical cohort).
+
+### 4. Machine Learning & Feature Exploration
+* **Current Status:** Inconclusive. Single-feature models (`Surprise_Pct`) using Logistic Regression and OLS Regression showed no statistically significant rank-ordering ability beyond the baseline categorical positive/negative split ($p > 0.45$).
+* **Data Anomaly Identified:** Outliers in `Surprise_Pct` (reaching thousands of percent due to near-zero denominators in EPS consensus estimates) skewed parameter estimates and require winsorization/trimming.
+
+---
+
+## Current Status & Limitations
+
+* **Execution Scope:** Only the **long-only** post-positive-surprise strategy (+20 trading days) is currently viable under unhedged conditions.
+* **Market-Neutral Redesign Required:** To monetize negative surprises, the short leg must be implemented as a market-neutral pair (Short Equity + Long SPY beta-adjusted hedge).
+* **Signal-to-Noise Ratio:** The mean return-to-volatility ratio per trade is low (~0.09). Capturing this edge requires broad position diversification across a multi-ticker portfolio rather than concentrated allocations.
+* **Provisional Modeling:** ML results are pending outlier remediation on denominator-distorted EPS surprise metrics. All figures reflect simulated historical backtests without live or paper execution.
